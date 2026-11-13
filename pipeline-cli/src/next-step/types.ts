@@ -103,6 +103,11 @@ export interface ReviewRoundState {
   roundPlan?: Omit<import('../incremental-review/review-rounds.js').ReviewRoundPlan, 'deltaDiff'>;
   /** Set while the staged review (RFC-0052) is driving this round. */
   staged?: StagedRoundState;
+  /**
+   * Highest subagent spawn sequence claimed when the round was prepared. A reviewer whose
+   * marker sequence is at or below it was spawned before the round: a reused context.
+   */
+  spawnSeqFloor?: number;
 }
 
 /** Durable state, JSON on disk between `next-step` invocations. */

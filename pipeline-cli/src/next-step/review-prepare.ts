@@ -33,6 +33,7 @@ import {
 import type { ReviewerType, ReviewerVerdict } from '../types.js';
 import { computeRequiredReviewers } from '../attestation/review-coverage.js';
 import { writeRunFile } from './init.js';
+import { currentSpawnSeq } from './review-finalize.js';
 import { startStagedRound } from './staged-round.js';
 import type { NextStepContext, NextStepState, ReviewRoundState, SpawnedReviewer } from './types.js';
 
@@ -363,6 +364,7 @@ export async function prepareReview(
 
   const baseReview: ReviewRoundState = {
     round,
+    spawnSeqFloor: currentSpawnSeq(state.worktreePath),
     spawned: [],
     autoApproved: [],
     headSha,

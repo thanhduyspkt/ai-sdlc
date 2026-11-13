@@ -144,15 +144,49 @@ export function resolveAgentIdFromMarkers(worktreePath: string, agent: string): 
 /**
  * AISDLC-995: fresh-context enforcer. A reviewer is refused when its agent id
  * was already used by an earlier reviewer of the round, or its marker's spawn
- * sequence is not greater than the previous reviewer's. Markers without a
- * `spawnSeq` (written before AISDLC-995) skip the sequence check only.
- * Returns agent name -> refusal message.
+ * sequence is not greater than `spawnSeqFloor`, the highest sequence claimed
+ * when the round was prepared (it was spawned before the round). Reviewers are
+ * spawned in parallel, so their order within the round is not checked.
+ * Markers without a `spawnSeq` (written before AISDLC-995), or a round without
+ * a floor, skip the sequence check only. Returns agent name -> refusal message.
  */
 export function detectReusedContexts(
   worktreePath: string,
   ordered: Array<{ agent: string; agentId: string }>,
+  spawnSeqFloor?: number,
 ): Map<string, string> {
   const refused = new Map<string, string>();
+  const seqById = readSpawnSeqs(worktreePath);
+  const seen = new Map<string, string>();
+  for (const { agent, agentId } of ordered) {
+    const dup = seen.get(agentId);
+    if (dup !== undefined) {
+      refused.set(
+        agent,
+        `reviewer ${agent} reused agent id ${agentId} already used by ${dup}; context is not fresh`,
+      );
+      continue;
+    }
+    seen.set(agentId, agent);
+    const seq = seqById.get(agentId);
+    if (seq !== undefined && spawnSeqFloor !== undefined && seq <= spawnSeqFloor) {
+      refused.set(
+        agent,
+        `reviewer ${agent} spawn sequence ${seq} is not greater than ${spawnSeqFloor}, the last spawn before this round; context is not fresh`,
+      );
+    }
+  }
+  return refused;
+}
+
+/** The highest spawn sequence any marker carries now; 0 when there is none. */
+export function currentSpawnSeq(worktreePath: string): number {
+  let max = 0;
+  for (const seq of readSpawnSeqs(worktreePath).values()) max = Math.max(max, seq);
+  return max;
+}
+
+function readSpawnSeqs(worktreePath: string): Map<string, number> {
   const seqById = new Map<string, number>();
   for (const root of markerRoots(worktreePath)) {
     const dir = join(root, '.ai-sdlc', 'subagent-sessions');
@@ -175,32 +209,7 @@ export function detectReusedContexts(
       }
     }
   }
-  const seen = new Map<string, string>();
-  let prevSeq: number | null = null;
-  let prevAgent = '';
-  for (const { agent, agentId } of ordered) {
-    const dup = seen.get(agentId);
-    if (dup !== undefined) {
-      refused.set(
-        agent,
-        `reviewer ${agent} reused agent id ${agentId} already used by ${dup}; context is not fresh`,
-      );
-    } else {
-      seen.set(agentId, agent);
-    }
-    const seq = seqById.get(agentId);
-    if (seq !== undefined) {
-      if (prevSeq !== null && seq <= prevSeq && !refused.has(agent)) {
-        refused.set(
-          agent,
-          `reviewer ${agent} spawn sequence ${seq} is not greater than ${prevAgent}'s ${prevSeq}; context is not fresh`,
-        );
-      }
-      prevSeq = seq;
-      prevAgent = agent;
-    }
-  }
-  return refused;
+  return seqById;
 }
 
 function markerRoots(worktreePath: string): string[] {
@@ -301,6 +310,7 @@ export async function finalizeReview(
   const reused = detectReusedContexts(
     state.worktreePath,
     [...agentIds].map(([agent, agentId]) => ({ agent, agentId })),
+    review.spawnSeqFloor,
   );
 
   for (const sp of review.spawned) {
