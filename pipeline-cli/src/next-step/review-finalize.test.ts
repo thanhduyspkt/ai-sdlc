@@ -9,6 +9,7 @@ import {
   finalizeReview,
   parseReviewReports,
   resolveAgentIdFromMarkers,
+  currentSpawnSeq,
   detectReusedContexts,
   enforceReviewerCoverage,
   type ReviewerReport,
@@ -186,17 +187,37 @@ describe('fresh-context enforcement (AISDLC-995)', () => {
     expect(r.get('y')).toMatch(/reused agent id/);
   });
 
-  it('refuses a non-increasing spawn sequence', () => {
+  it('refuses a reviewer spawned before the round (sequence at or below the floor)', () => {
     mk('a', 5);
     mk('b', 3);
-    const r = detectReusedContexts(state.worktreePath, [
-      { agent: 'x', agentId: 'a' },
-      { agent: 'y', agentId: 'b' },
-    ]);
-    expect(r.get('y')).toMatch(/not greater/);
+    const r = detectReusedContexts(
+      state.worktreePath,
+      [
+        { agent: 'x', agentId: 'a' },
+        { agent: 'y', agentId: 'b' },
+      ],
+      3,
+    );
+    expect([...r.keys()]).toEqual(['y']);
+    expect(r.get('y')).toMatch(/not greater than 3, the last spawn before this round/);
   });
 
-  it('accepts increasing sequences and markers without a sequence', () => {
+  it('accepts parallel reviewers whose sequences finish out of order', () => {
+    mk('a', 88);
+    mk('b', 87);
+    expect(
+      detectReusedContexts(
+        state.worktreePath,
+        [
+          { agent: 'correctness-reviewer', agentId: 'a' },
+          { agent: 'security-reviewer', agentId: 'b' },
+        ],
+        86,
+      ).size,
+    ).toBe(0);
+  });
+
+  it('accepts markers without a sequence and rounds without a floor', () => {
     mk('a', 1);
     mk('b', 2);
     mk('c');
@@ -207,6 +228,14 @@ describe('fresh-context enforcement (AISDLC-995)', () => {
         { agent: 'z', agentId: 'c' },
       ]).size,
     ).toBe(0);
+  });
+
+  it('currentSpawnSeq returns the highest marker sequence, 0 with none', () => {
+    expect(currentSpawnSeq(state.worktreePath)).toBe(0);
+    mk('a', 4);
+    mk('b', 9);
+    mk('c');
+    expect(currentSpawnSeq(state.worktreePath)).toBe(9);
   });
 });
 
